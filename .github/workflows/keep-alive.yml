@@ -83,7 +83,8 @@ jobs:
         run: |
           SERVICE_NAME="${{ matrix.website.name }}"
           SERVICE_URL="${{ matrix.website.url }}"
-          SERVICE_ID="${{ matrix.website.id }}" # Assuming 'id' exists in your website object
+          # Assuming 'id' exists in your website object
+          SERVICE_ID="${{ matrix.website.id }}"
           
           # Determine the ping interval for this specific service
           SITE_PING_INTERVAL_MINUTES="${{ matrix.website.pingIntervalMinutes }}"
