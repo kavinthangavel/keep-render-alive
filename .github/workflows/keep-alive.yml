@@ -75,7 +75,7 @@ jobs:
       fail-fast: false
     
     steps:
-      - name: 🏓 Ping ${{ matrix.website.name }} (Interval: ${{ matrix.website.pingIntervalMinutes }} min)
+      - name: 🏓 Ping ${{ matrix.website.name }} (Interval ${{ matrix.website.pingIntervalMinutes || needs.setup-matrix.outputs.default_ping_interval }} min)
         env:
           GH_RUN_NUMBER: ${{ github.run_number }}
           MAX_RETRIES_ENV: ${{ needs.setup-matrix.outputs.output_max_retries }}
@@ -83,14 +83,13 @@ jobs:
         run: |
           SERVICE_NAME="${{ matrix.website.name }}"
           SERVICE_URL="${{ matrix.website.url }}"
-          # Assuming 'id' exists in your website object
           SERVICE_ID="${{ matrix.website.id }}"
           
           # Determine the ping interval for this specific service
           SITE_PING_INTERVAL_MINUTES="${{ matrix.website.pingIntervalMinutes }}"
           DEFAULT_PING_INTERVAL="${{ needs.setup-matrix.outputs.default_ping_interval }}"
 
-          if ! [[ "$SITE_PING_INTERVAL_MINUTES" =~ ^[0-9]+$ ]] || [ "$SITE_PING_INTERVAL_MINUTES" -le 0 ]; then
+          if [ -z "$SITE_PING_INTERVAL_MINUTES" ] || ! [[ "$SITE_PING_INTERVAL_MINUTES" =~ ^[0-9]+$ ]] || [ "$SITE_PING_INTERVAL_MINUTES" -le 0 ]; then
             echo "ℹ️ Invalid or missing pingIntervalMinutes for '$SERVICE_NAME'. Using default: $DEFAULT_PING_INTERVAL minutes."
             SITE_PING_INTERVAL_MINUTES="$DEFAULT_PING_INTERVAL"
           fi
@@ -101,7 +100,7 @@ jobs:
           echo "⏱️ Desired Interval for this service: $SITE_PING_INTERVAL_MINUTES minutes"
 
           # Timing logic for this specific service
-          BASE_CRON_INTERVAL=14 # This is the workflow\'s base tick rate
+          BASE_CRON_INTERVAL=14 # This is the workflow's base tick rate
           RUN_NUMBER="$GH_RUN_NUMBER"
           TIME_TO_PING_THIS_SITE_THIS_RUN="false"
 
@@ -149,12 +148,12 @@ jobs:
             for attempt in $(seq 1 "$max_r"); do
               echo "🔄 Attempt $attempt/$max_r for $SERVICE_NAME"
               
-              RESPONSE=$(curl -s -w "HTTPSTATUS:%{http_code}" --max-time 30 "$url_to_test" || echo "HTTPSTATUS:000")
-              STATUS=$(echo "$RESPONSE" | tr -d '\\n' | sed -e 's/.*HTTPSTATUS://')
-              BODY=$(echo "$RESPONSE" | sed -e 's/HTTPSTATUS\\:.*//g')
+              RESPONSE=$(curl -s -w "HTTPSTATUS:%{http_code}" --max-time 30 "$url_to_test" 2>/dev/null || echo "HTTPSTATUS:000")
+              STATUS=$(echo "$RESPONSE" | tr -d '\n' | sed -e 's/.*HTTPSTATUS://')
+              BODY=$(echo "$RESPONSE" | sed -e 's/HTTPSTATUS\:.*//g')
               
               echo "📊 Status Code for $SERVICE_NAME: $STATUS"
-              echo "📄 Full Response Body from $endpoint_name_desc (Attempt $attempt) for $SERVICE_NAME:"
+              echo "📄 Response Body from $endpoint_name_desc (Attempt $attempt) for $SERVICE_NAME:"
               echo "$BODY" 
               
               if [ "$STATUS" = "200" ]; then
@@ -180,6 +179,7 @@ jobs:
             echo "🎉 Service $SERVICE_NAME root endpoint responded!"
           else
             echo "💥 All endpoints failed for $SERVICE_NAME"
+            exit 1
           fi
 
       - name: 📊 Log Activity for ${{ matrix.website.name }}
@@ -188,10 +188,10 @@ jobs:
           # This log reflects the outcome of the ping attempt for *this specific service*
           # The previous timing logic determines if a ping was even attempted.
           echo "🕐 Activity log for service: ${{ matrix.website.name }} at $(date)"
-          echo "⏱️ Configured interval for this service: ${{ matrix.website.pingIntervalMinutes }} (defaulted to ${{ needs.setup-matrix.outputs.default_ping_interval }} if not set)"
+          echo "⏱️ Configured interval for this service: ${{ matrix.website.pingIntervalMinutes || needs.setup-matrix.outputs.default_ping_interval }} (defaulted to ${{ needs.setup-matrix.outputs.default_ping_interval }} if not set)"
 
   summary:
-    needs: [setup-matrix]
+    needs: [setup-matrix, ping-services]
     runs-on: ubuntu-latest
     if: always()
     
