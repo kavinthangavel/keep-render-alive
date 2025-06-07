@@ -1,0 +1,27 @@
+{
+  "name": "render-keepalive-action",
+  "version": "1.0.0",
+  "description": "A GitHub Action setup to keep web services alive by pinging them, configured via a manually managed websites.json.",
+  "main": "",
+  "scripts": {
+  },
+  "keywords": [
+    "render",
+    "keepalive",
+    "github-actions",
+    "health-check",
+    "uptime-monitoring",
+    "manual-config"
+  ],
+  "author": "GitHub Copilot",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/your-username/render-keepalive-action"
+  },
+  "dependencies": {},
+  "devDependencies": {},
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

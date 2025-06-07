@@ -1,0 +1,208 @@
+name: 🏓 Keep Render Services Alive
+
+on:
+  schedule:
+    # Cron schedule: runs every 14 minutes. This is the base tick.
+    - cron: '*/14 * * * *'
+  workflow_dispatch: # Allows manual triggering
+
+jobs:
+  setup-matrix:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.set-matrix.outputs.matrix }}
+      # Output for whether any sites are enabled at all
+      any_sites_enabled: ${{ steps.set-matrix.outputs.any_sites_enabled }}
+      # Output the default ping interval for use in ping-services if a site doesn't have its own
+      default_ping_interval: ${{ steps.set-matrix.outputs.default_ping_interval }}
+    
+    steps:
+      - name: 📋 Checkout repository
+        uses: actions/checkout@v4
+
+      - name: 🔍 Parse websites configuration
+        id: set-matrix
+        run: |
+          if [ ! -f "websites.json" ]; then
+            echo "⚠️ websites.json not found, creating default configuration"
+            echo '{"settings":{"defaultPingIntervalMinutes":14,"enableMultipleServices":true,"maxRetries":3},"websites":[]}' > websites.json
+          fi
+          
+          WEBSITES_JSON=$(cat websites.json)
+          echo "📋 Configuration loaded: $WEBSITES_JSON"
+          
+          # Extract all enabled websites (full objects)
+          ENABLED_WEBSITES_JSON=$(echo "$WEBSITES_JSON" | jq -c '[.websites[] | select(.enabled == true)]')
+          DEFAULT_PING_INTERVAL_FROM_JSON=$(echo "$WEBSITES_JSON" | jq -r '.settings.defaultPingIntervalMinutes // 14')
+
+          # Validate DEFAULT_PING_INTERVAL_FROM_JSON
+          if ! [[ "$DEFAULT_PING_INTERVAL_FROM_JSON" =~ ^[0-9]+$ ]] || [ "$DEFAULT_PING_INTERVAL_FROM_JSON" -le 0 ]; then
+            echo "⚠️ defaultPingIntervalMinutes ('$DEFAULT_PING_INTERVAL_FROM_JSON') is invalid. Defaulting to 14."
+            DEFAULT_PING_INTERVAL_FROM_JSON=14
+          fi
+          
+          echo "⏰ Default Ping Interval from JSON settings: $DEFAULT_PING_INTERVAL_FROM_JSON minutes"
+          echo "🔄 Multiple services enabled setting from JSON: $(echo "$WEBSITES_JSON" | jq -r '.settings.enableMultipleServices // true')"
+          
+          if [ "$(echo "$ENABLED_WEBSITES_JSON" | jq 'length')" -gt 0 ]; then
+            echo "matrix=$ENABLED_WEBSITES_JSON" >> $GITHUB_OUTPUT
+            echo "any_sites_enabled=true" >> $GITHUB_OUTPUT
+            echo "✅ Found $(echo "$ENABLED_WEBSITES_JSON" | jq 'length') enabled websites."
+          else
+            echo "matrix=[]" >> $GITHUB_OUTPUT # Output empty matrix
+            echo "any_sites_enabled=false" >> $GITHUB_OUTPUT
+            echo "ℹ️ No enabled websites found in websites.json."
+          fi
+          echo "default_ping_interval=$DEFAULT_PING_INTERVAL_FROM_JSON" >> $GITHUB_OUTPUT
+          
+  ping-services:
+    needs: setup-matrix
+    runs-on: ubuntu-latest
+    # Run this job if any sites are enabled in the configuration
+    if: needs.setup-matrix.outputs.any_sites_enabled == 'true'
+    
+    strategy:
+      matrix:
+        website: ${{ fromJson(needs.setup-matrix.outputs.matrix) }}
+      fail-fast: false
+    
+    steps:
+      - name: 🏓 Ping ${{ matrix.website.name }} (Interval: ${{ matrix.website.pingIntervalMinutes }} min)
+        run: |
+          SERVICE_NAME="${{ matrix.website.name }}"
+          SERVICE_URL="${{ matrix.website.url }}"
+          SERVICE_ID="${{ matrix.website.id }}" # Assuming 'id' exists in your website object
+          
+          # Determine the ping interval for this specific service
+          SITE_PING_INTERVAL_MINUTES="${{ matrix.website.pingIntervalMinutes }}"
+          DEFAULT_PING_INTERVAL="${{ needs.setup-matrix.outputs.default_ping_interval }}"
+
+          if ! [[ "$SITE_PING_INTERVAL_MINUTES" =~ ^[0-9]+$ ]] || [ "$SITE_PING_INTERVAL_MINUTES" -le 0 ]; then
+            echo "ℹ️ Invalid or missing pingIntervalMinutes for '$SERVICE_NAME'. Using default: $DEFAULT_PING_INTERVAL minutes."
+            SITE_PING_INTERVAL_MINUTES="$DEFAULT_PING_INTERVAL"
+          fi
+          
+          echo "🏓 Pinging service: $SERVICE_NAME"
+          echo "🔗 URL: $SERVICE_URL"
+          echo "🆔 ID: $SERVICE_ID"
+          echo "⏱️ Desired Interval for this service: $SITE_PING_INTERVAL_MINUTES minutes"
+
+          # Timing logic for this specific service
+          BASE_CRON_INTERVAL=14 # This is the workflow's base tick rate
+          RUN_NUMBER=${{ github.run_number }}
+          TIME_TO_PING_THIS_SITE_THIS_RUN="false"
+
+          echo "⚙️ Current workflow run_number: $RUN_NUMBER"
+
+          if [ "$RUN_NUMBER" -eq 1 ]; then
+            TIME_TO_PING_THIS_SITE_THIS_RUN="true"
+            echo "ℹ️ First run of the workflow, will attempt ping for '$SERVICE_NAME'."
+          else
+            # Integer arithmetic for block calculation
+            PREV_CALC_NUMERATOR=$(( (RUN_NUMBER - 1) * BASE_CRON_INTERVAL ))
+            PREV_INTERVAL_BLOCK=$(( PREV_CALC_NUMERATOR / SITE_PING_INTERVAL_MINUTES ))
+            
+            CURR_CALC_NUMERATOR=$(( RUN_NUMBER * BASE_CRON_INTERVAL ))
+            CURRENT_INTERVAL_BLOCK=$(( CURR_CALC_NUMERATOR / SITE_PING_INTERVAL_MINUTES ))
+
+            echo "Debug for '$SERVICE_NAME': PrevNumerator=$PREV_CALC_NUMERATOR, PrevBlock=$PREV_INTERVAL_BLOCK (SiteInterval=$SITE_PING_INTERVAL_MINUTES)"
+            echo "Debug for '$SERVICE_NAME': CurrNumerator=$CURR_CALC_NUMERATOR, CurrBlock=$CURRENT_INTERVAL_BLOCK (SiteInterval=$SITE_PING_INTERVAL_MINUTES)"
+
+            if [ "$PREV_INTERVAL_BLOCK" -lt "$CURRENT_INTERVAL_BLOCK" ]; then
+              TIME_TO_PING_THIS_SITE_THIS_RUN="true"
+            fi
+          fi
+
+          if [ "$TIME_TO_PING_THIS_SITE_THIS_RUN" = "false" ]; then
+            echo "ℹ️ Skipping ping for '$SERVICE_NAME': Not time yet based on its interval of $SITE_PING_INTERVAL_MINUTES min and run number $RUN_NUMBER."
+            exit 0 # Exit this step for this service, not the whole job
+          fi
+
+          echo "✅ Time to ping '$SERVICE_NAME' on this run."
+          
+          # Existing test_endpoint function (ensure MAX_RETRIES and RETRY_DELAY are defined or use settings)
+          MAX_RETRIES=$(echo '${{ toJson(fromJson(needs.setup-matrix.outputs.matrix)[0]) }}' | jq -r '.maxRetries // 3') # Example, better to pass from settings if global
+          RETRY_DELAY=5 # Or from settings
+
+          # Function to test endpoint (copied from previous version, ensure it's robust)
+          test_endpoint() {
+            local url_to_test=$1
+            local endpoint_name_desc=$2
+            local max_r=$3 # Pass MAX_RETRIES
+            local retry_d=$4 # Pass RETRY_DELAY
+            
+            echo "📊 Testing $endpoint_name_desc: $url_to_test"
+            
+            for attempt in $(seq 1 "$max_r"); do
+              echo "🔄 Attempt $attempt/$max_r for $SERVICE_NAME"
+              
+              RESPONSE=$(curl -s -w "HTTPSTATUS:%{http_code}" --max-time 30 "$url_to_test" || echo "HTTPSTATUS:000")
+              STATUS=$(echo "$RESPONSE" | tr -d '\\n' | sed -e 's/.*HTTPSTATUS://')
+              BODY=$(echo "$RESPONSE" | sed -e 's/HTTPSTATUS\\:.*//g')
+              
+              echo "📊 Status Code for $SERVICE_NAME: $STATUS"
+              echo "📄 Full Response Body from $endpoint_name_desc (Attempt $attempt) for $SERVICE_NAME:"
+              echo "$BODY" 
+              
+              if [ "$STATUS" = "200" ]; then
+                echo "✅ $endpoint_name_desc successful for $SERVICE_NAME!"
+                return 0
+              else
+                echo "⚠️ $endpoint_name_desc failed for $SERVICE_NAME with status: $STATUS"
+                if [ "$attempt" -lt "$max_r" ]; then
+                  echo "⏳ Waiting ${retry_d}s before retry for $SERVICE_NAME..."
+                  sleep "$retry_d"
+                fi
+              fi
+            done
+            return 1
+          }
+          
+          # Endpoint probing logic (ensure SERVICE_URL is correctly defined from matrix.website.url)
+          if test_endpoint "$SERVICE_URL/healthz" "Health endpoint" "$MAX_RETRIES" "$RETRY_DELAY"; then
+            echo "🎉 Service $SERVICE_NAME is healthy!"
+          elif test_endpoint "$SERVICE_URL/ping" "Ping endpoint" "$MAX_RETRIES" "$RETRY_DELAY"; then
+            echo "🎉 Service $SERVICE_NAME responded to ping!"
+          elif test_endpoint "$SERVICE_URL/" "Root endpoint" "$MAX_RETRIES" "$RETRY_DELAY"; then
+            echo "🎉 Service $SERVICE_NAME root endpoint responded!"
+          else
+            echo "💥 All endpoints failed for $SERVICE_NAME"
+          fi
+
+      - name: 📊 Log Activity for ${{ matrix.website.name }}
+        if: always() # Log activity regardless of ping success/skip for this service
+        run: |
+          # This log reflects the outcome of the ping attempt for *this specific service*
+          # The previous timing logic determines if a ping was even attempted.
+          echo "🕐 Activity log for service: ${{ matrix.website.name }} at $(date)"
+          echo "⏱️ Configured interval for this service: ${{ matrix.website.pingIntervalMinutes }} (defaulted to ${{ needs.setup-matrix.outputs.default_ping_interval }} if not set)"
+          # Add more specific outcome logging here if needed, e.g., based on a variable set in the ping step
+
+  summary:
+    needs: [setup-matrix] # Only depends on setup-matrix now for overall info
+    runs-on: ubuntu-latest
+    if: always()
+    
+    steps:
+      - name: 📊 Workflow Summary
+        run: |
+          echo "🏁 Keep-Alive Workflow Summary"
+          echo "================================="
+          echo "🕐 Workflow completed at: $(date)"
+          echo "⚙️ Workflow run_number: ${{ github.run_number }}"
+          echo "⏰ Default Ping Interval from settings: ${{ needs.setup-matrix.outputs.default_ping_interval }} minutes"
+          echo "    (Individual services may have their own intervals specified in websites.json)"
+          echo "    (Workflow base tick rate is every 14 minutes via cron: '*/14 * * * *')"
+          
+          if [ "${{ needs.setup-matrix.outputs.any_sites_enabled }}" = "true" ]; then
+            # The matrix itself contains all enabled sites.
+            # We can't easily tell here which ones were *actually* pinged due to per-site timing.
+            TOTAL_ENABLED_SITES=$(echo '${{ needs.setup-matrix.outputs.matrix }}' | jq length)
+            echo "🌐 Total enabled services in websites.json: $TOTAL_ENABLED_SITES"
+            echo "ℹ️ Pinging for each service is determined by its individual interval and the workflow run number."
+          else
+            echo "⚠️ No enabled websites found in websites.json."
+          fi
+          
+          echo ""
+          echo "📖 For setup, edit 'websites.json' and see README.md"

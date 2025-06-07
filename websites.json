@@ -1,0 +1,18 @@
+{
+  "settings": {
+    "defaultPingIntervalMinutes": 14,
+    "enableMultipleServices": true,
+    "maxRetries": 3
+  },
+  "websites": [
+    {
+      "id": "service-1",
+      "name": "Shinzo AI",
+      "url": "https://n8n-latest-x67i.onrender.com/",
+      "enabled": true,
+      "pingIntervalMinutes": 14,
+      "addedAt": "2025-06-07T00:00:00.000Z",
+      "notes": "Main application endpoint"
+    }
+  ]
+}
