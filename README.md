@@ -38,22 +38,22 @@ A super-simple GitHub Actions workflow that pings your web services (like Render
 
    ```json
    {
-  "settings": {
+   "settings": {
     "defaultPingIntervalMinutes": 14,
     "enableMultipleServices": true,
     "maxRetries": 3
-  },
-     "websites": [
-       {
-         "id": "my-app",
-         "name": "My Render App",
-         "url": "https://my-app.onrender.com/healthz",
-         "enabled": true,
-         "pingIntervalMinutes": 14,
-         "addedAt": "2025-06-07T00:00:00.000Z",
-         "notes": "Main application endpoint"
-       }
-     ]
+   },
+   "websites": [
+    {
+      "id": "service-1",
+      "name": "example",
+      "url": "https://demo.onrender.com/",
+      "enabled": true,
+      "pingIntervalMinutes": 14,
+      "addedAt": "2025-06-07T00:00:00.000Z",
+      "notes": "Main application endpoint"
+    }
+   ]
    }
    ```
 
