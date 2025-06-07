@@ -56,7 +56,7 @@ A super-simple GitHub Actions workflow that pings your web services (like Render
    ]
    }
    ```
-   - Don't Include '/' at the end of url (ex: https://demo.com/ - [no], https://demo.com - [yes])
+   - Don't Include '/' at the end of url (ex: https://demo.com/ - [no 👎], https://demo.com - [yes 🫰])
    - Add as many sites as you want!
    - Set `"enabled": false` to pause pinging a site.
    - addedAt,notes is Optional
