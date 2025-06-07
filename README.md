@@ -47,7 +47,7 @@ A super-simple GitHub Actions workflow that pings your web services (like Render
     {
       "id": "service-1",
       "name": "example",
-      "url": "https://demo.onrender.com/",
+      "url": "https://demo.onrender.com",
       "enabled": true,
       "pingIntervalMinutes": 14,
       "addedAt": "2025-06-07T00:00:00.000Z",
@@ -56,7 +56,7 @@ A super-simple GitHub Actions workflow that pings your web services (like Render
    ]
    }
    ```
-
+   - Don't Include '/' at the end of url (ex: https://demo.com/ - [no], https://demo.com - [yes])
    - Add as many sites as you want!
    - Set `"enabled": false` to pause pinging a site.
    - addedAt,notes is Optional
