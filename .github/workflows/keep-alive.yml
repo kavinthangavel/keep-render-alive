@@ -15,6 +15,8 @@ jobs:
       any_sites_enabled: ${{ steps.set-matrix.outputs.any_sites_enabled }}
       # Output the default ping interval for use in ping-services if a site doesn't have its own
       default_ping_interval: ${{ steps.set-matrix.outputs.default_ping_interval }}
+      output_max_retries: ${{ steps.set-matrix.outputs.max_retries }}
+      output_retry_delay: ${{ steps.set-matrix.outputs.retry_delay_seconds }}
     
     steps:
       - name: 📋 Checkout repository
@@ -25,7 +27,7 @@ jobs:
         run: |
           if [ ! -f "websites.json" ]; then
             echo "⚠️ websites.json not found, creating default configuration"
-            echo '{"settings":{"defaultPingIntervalMinutes":14,"enableMultipleServices":true,"maxRetries":3},"websites":[]}' > websites.json
+            echo '{"settings":{"defaultPingIntervalMinutes":14,"enableMultipleServices":true,"maxRetries":3,"defaultRetryDelaySeconds":5},"websites":[]}' > websites.json
           fi
           
           WEBSITES_JSON=$(cat websites.json)
@@ -34,6 +36,8 @@ jobs:
           # Extract all enabled websites (full objects)
           ENABLED_WEBSITES_JSON=$(echo "$WEBSITES_JSON" | jq -c '[.websites[] | select(.enabled == true)]')
           DEFAULT_PING_INTERVAL_FROM_JSON=$(echo "$WEBSITES_JSON" | jq -r '.settings.defaultPingIntervalMinutes // 14')
+          MAX_RETRIES_FROM_JSON=$(echo "$WEBSITES_JSON" | jq -r '.settings.maxRetries // 3')
+          RETRY_DELAY_FROM_JSON=$(echo "$WEBSITES_JSON" | jq -r '.settings.defaultRetryDelaySeconds // 5')
 
           # Validate DEFAULT_PING_INTERVAL_FROM_JSON
           if ! [[ "$DEFAULT_PING_INTERVAL_FROM_JSON" =~ ^[0-9]+$ ]] || [ "$DEFAULT_PING_INTERVAL_FROM_JSON" -le 0 ]; then
@@ -43,6 +47,8 @@ jobs:
           
           echo "⏰ Default Ping Interval from JSON settings: $DEFAULT_PING_INTERVAL_FROM_JSON minutes"
           echo "🔄 Multiple services enabled setting from JSON: $(echo "$WEBSITES_JSON" | jq -r '.settings.enableMultipleServices // true')"
+          echo "🔁 Max Retries from JSON settings: $MAX_RETRIES_FROM_JSON"
+          echo "⏳ Default Retry Delay from JSON settings: $RETRY_DELAY_FROM_JSON seconds"
           
           if [ "$(echo "$ENABLED_WEBSITES_JSON" | jq 'length')" -gt 0 ]; then
             echo "matrix=$ENABLED_WEBSITES_JSON" >> $GITHUB_OUTPUT
@@ -54,6 +60,8 @@ jobs:
             echo "ℹ️ No enabled websites found in websites.json."
           fi
           echo "default_ping_interval=$DEFAULT_PING_INTERVAL_FROM_JSON" >> $GITHUB_OUTPUT
+          echo "max_retries=$MAX_RETRIES_FROM_JSON" >> $GITHUB_OUTPUT
+          echo "retry_delay_seconds=$RETRY_DELAY_FROM_JSON" >> $GITHUB_OUTPUT
           
   ping-services:
     needs: setup-matrix
@@ -68,6 +76,10 @@ jobs:
     
     steps:
       - name: 🏓 Ping ${{ matrix.website.name }} (Interval: ${{ matrix.website.pingIntervalMinutes }} min)
+        env:
+          GH_RUN_NUMBER: ${{ github.run_number }}
+          MAX_RETRIES_ENV: ${{ needs.setup-matrix.outputs.output_max_retries }}
+          RETRY_DELAY_ENV: ${{ needs.setup-matrix.outputs.output_retry_delay }}
         run: |
           SERVICE_NAME="${{ matrix.website.name }}"
           SERVICE_URL="${{ matrix.website.url }}"
@@ -88,8 +100,8 @@ jobs:
           echo "⏱️ Desired Interval for this service: $SITE_PING_INTERVAL_MINUTES minutes"
 
           # Timing logic for this specific service
-          BASE_CRON_INTERVAL=14 # This is the workflow's base tick rate
-          RUN_NUMBER=${{ github.run_number }}
+          BASE_CRON_INTERVAL=14 # This is the workflow\'s base tick rate
+          RUN_NUMBER="$GH_RUN_NUMBER"
           TIME_TO_PING_THIS_SITE_THIS_RUN="false"
 
           echo "⚙️ Current workflow run_number: $RUN_NUMBER"
@@ -120,11 +132,11 @@ jobs:
 
           echo "✅ Time to ping '$SERVICE_NAME' on this run."
           
-          # Existing test_endpoint function (ensure MAX_RETRIES and RETRY_DELAY are defined or use settings)
-          MAX_RETRIES=$(echo '${{ toJson(fromJson(needs.setup-matrix.outputs.matrix)[0]) }}' | jq -r '.maxRetries // 3') # Example, better to pass from settings if global
-          RETRY_DELAY=5 # Or from settings
+          # Use MAX_RETRIES and RETRY_DELAY from environment variables passed from setup-matrix job
+          MAX_RETRIES="$MAX_RETRIES_ENV"
+          RETRY_DELAY="$RETRY_DELAY_ENV"
 
-          # Function to test endpoint (copied from previous version, ensure it's robust)
+          # Function to test endpoint
           test_endpoint() {
             local url_to_test=$1
             local endpoint_name_desc=$2
@@ -176,10 +188,9 @@ jobs:
           # The previous timing logic determines if a ping was even attempted.
           echo "🕐 Activity log for service: ${{ matrix.website.name }} at $(date)"
           echo "⏱️ Configured interval for this service: ${{ matrix.website.pingIntervalMinutes }} (defaulted to ${{ needs.setup-matrix.outputs.default_ping_interval }} if not set)"
-          # Add more specific outcome logging here if needed, e.g., based on a variable set in the ping step
 
   summary:
-    needs: [setup-matrix] # Only depends on setup-matrix now for overall info
+    needs: [setup-matrix]
     runs-on: ubuntu-latest
     if: always()
     
