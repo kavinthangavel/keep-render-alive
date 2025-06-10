@@ -1,4 +1,6 @@
-# 🚀 Render Keep-Alive Service
+# 🚀[Depreciated] Render Keep-Alive Service
+
+> Checkout this repo [Cloudflare Worker](https://github.com/kavinthangavel/cloudflare-render-ping)
 
 Keep your free-tier web apps awake—automagically!  
 No more “spinning up” delays. No more sleeping demos.  
