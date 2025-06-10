@@ -32,8 +32,8 @@ A super-simple GitHub Actions workflow that pings your web services (like Render
 1. **Clone this repo** (or add the files to your own):
 
    ```pwsh
-   git clone <your-repo-url>
-   cd <your-repo>
+   git clone https://github.com/kavinthangavel/keep-render-alive/
+   cd keep-render-alive
    ```
 
 2. **Edit `websites.json`:**
