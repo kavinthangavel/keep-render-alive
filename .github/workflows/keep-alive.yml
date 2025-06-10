@@ -3,7 +3,7 @@ name: 🏓 Keep Render Services Alive
 on:
   schedule:
     # Cron schedule: runs every 14 minutes. This is the base tick.
-    - cron: '*/14 * * * *'
+    #- cron: '*/14 * * * *'
   workflow_dispatch: # Allows manual triggering
 
 jobs:
